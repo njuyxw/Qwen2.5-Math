@@ -110,6 +110,7 @@ def setup(args):
     available_gpus = os.environ["CUDA_VISIBLE_DEVICES"].split(",")
     if args.use_vllm:
         llm = LLM(
+            gpu_memory_utilization=0.9,
             model=args.model_name_or_path,
             tensor_parallel_size=len(available_gpus) // args.pipeline_parallel_size,
             pipeline_parallel_size=args.pipeline_parallel_size,
@@ -257,6 +258,7 @@ def main(llm, tokenizer, data_name, args):
 
         # get all outputs
         prompts = [item[1] for item in current_prompts]
+        print(len(prompts))
         if args.use_vllm:
             outputs = llm.generate(
                 prompts,
@@ -264,20 +266,44 @@ def main(llm, tokenizer, data_name, args):
                     temperature=args.temperature,
                     top_p=args.top_p,
                     max_tokens=args.max_tokens_per_call,
-                    n=1,
+                    n=32,
                     stop=stop_words,
                     stop_token_ids=(
                         [151645, 151643]
                         if "qwen2" in args.model_name_or_path.lower()
                         else None
                     ),
+                    skip_special_tokens=False,
+                    logprobs=5,
                 ),
+            
             )
-
+            # print(len(outputs[0].outputs))
+            # print(outputs[0].outputs[1])
             outputs = sorted(
                 outputs, key=lambda x: int(x.request_id)
             )  # sort outputs by request_id
-            outputs = [output.outputs[0].text for output in outputs]
+            
+            # get the max culmulative cumulative_logprob
+            new_outputs = []
+            for i in range(len(outputs)):
+                for j in range(len(outputs[i].outputs)):
+                    # print(j,outputs[i].outputs[j].cumulative_logprob)
+                    if '<backtrack>' not in outputs[i].outputs[j].text:
+                        new_outputs.append(outputs[i].outputs[j].text)
+                        break
+                    elif j == len(outputs[i].outputs) - 1:
+                        new_outputs.append(outputs[i].outputs[j].text)
+                        break
+                
+            outputs=new_outputs
+            # outputs = [output.outputs[0].text for output in outputs]
+            
+            # print(outputs)
+            # print(len(outputs))
+            # exit()
+            # print(outputs[0])
+            # exit()
         else:
             outputs = generate_completions(
                 model=llm,
